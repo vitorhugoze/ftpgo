@@ -1,5 +1,9 @@
 <h1 align="center">ftpgo</h1>
 
+```
+go get github.com/vitorhugoze/ftpgo
+```
+
 **ftpgo** Is a ftp implementation developed on top of the default go tcp package made for for allowing file transfer between client and server
 
 **Example usage:**
