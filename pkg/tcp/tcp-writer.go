@@ -1,10 +1,9 @@
-package ftpgo
+package tcp
 
 import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"errors"
 	"io"
 	"io/fs"
 	"log"
@@ -13,89 +12,55 @@ import (
 	"path/filepath"
 )
 
-type TcpFileSender struct {
-	BufSize                             int
-	SingleFile                          bool
-	ServerAddress, SourcePath, DestPath string
-}
+func DataResponder(conn net.Conn) error {
 
-func NewTcpFileSender(serverAddress, sourcePath, destPath string) TcpFileSender {
+	var bufSize int64
 
-	var singleFile bool
-
-	if filepath.Ext(sourcePath) == "" {
-		if filepath.Ext(destPath) != "" {
-			log.Fatal(errors.New("can't export from a local forder to a remote file, both need to be folders"))
-		}
-
-		singleFile = false
-	} else {
-		singleFile = true
-	}
-
-	return TcpFileSender{
-		BufSize:       16384,
-		SingleFile:    singleFile,
-		ServerAddress: serverAddress,
-		SourcePath:    sourcePath,
-		DestPath:      destPath,
-	}
-}
-
-func (fileSender TcpFileSender) WithBufferSize(BufSize int) TcpFileSender {
-	fileSender.BufSize = BufSize
-	return fileSender
-}
-
-func (fileSender TcpFileSender) SendData() error {
-
-	buf := new(bytes.Buffer)
 	dataChan := make(chan []byte)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go fileSender.tcpDataSender(dataChan, ctx)
+	go TcpResponseWriter(dataChan, conn, ctx)
 
-	//Tell server if is sending a single file or a folder
-	if err := binary.Write(buf, binary.BigEndian, fileSender.SingleFile); err != nil {
-		return err
-	}
-	dataChan <- buf.Bytes()
-
-	//Tell server the destination path
-	if err := writeFileInfo(dataChan, []byte(filepath.Dir(fileSender.DestPath))); err != nil {
+	if err := binary.Read(conn, binary.BigEndian, &bufSize); err != nil {
 		return err
 	}
 
-	//Check if is a folder or just a file
-	if fileSender.SingleFile {
+	path, err := ReadFileInfo(conn)
+	if err != nil {
+		return err
+	}
 
-		f, err := os.Open(fileSender.SourcePath)
+	//Check if is folder or file
+	if filepath.Ext(path) == "" {
+
+		if err = FolderWriter(dataChan, int(bufSize), path); err != nil {
+			log.Fatal(err)
+		}
+	} else {
+
+		f, err := os.Open(path)
 		if err != nil {
 			return err
 		}
-		defer f.Close()
 
-		//Writes filename to the server
-		if err = writeFileInfo(dataChan, []byte(filepath.Base(fileSender.SourcePath))); err != nil {
+		if err = FileWriter(dataChan, int(bufSize), f); err != nil {
 			return err
 		}
-
-		return fileSender.fileWriter(dataChan, f)
-	} else {
-		return fileSender.folderWriter(dataChan)
 	}
+
+	return nil
 }
 
 /*
 Write data from all the content on the sourcePath to dataChan
 */
-func (fileSender TcpFileSender) folderWriter(dataChan chan<- []byte) error {
+func FolderWriter(dataChan chan<- []byte, bufSize int, sourcePath string) error {
 
 	var currPath string
 
-	err := filepath.Walk(fileSender.SourcePath, func(path string, info fs.FileInfo, err error) error {
+	err := filepath.Walk(sourcePath, func(path string, info fs.FileInfo, err error) error {
 
 		buf := new(bytes.Buffer)
 
@@ -105,7 +70,7 @@ func (fileSender TcpFileSender) folderWriter(dataChan chan<- []byte) error {
 
 		if info.IsDir() {
 
-			currPath, err = filepath.Rel(fileSender.SourcePath, path)
+			currPath, err = filepath.Rel(sourcePath, path)
 			if err != nil {
 				return err
 			}
@@ -119,7 +84,7 @@ func (fileSender TcpFileSender) folderWriter(dataChan chan<- []byte) error {
 			dataChan <- buf.Bytes()
 
 			//Writes file relative path and name to server
-			if err = writeFileInfo(dataChan, []byte(filepath.Join(currPath, filepath.Base(path)))); err != nil {
+			if err = WriteFileInfo(dataChan, []byte(filepath.Join(currPath, filepath.Base(path)))); err != nil {
 				return err
 			}
 
@@ -129,7 +94,7 @@ func (fileSender TcpFileSender) folderWriter(dataChan chan<- []byte) error {
 			}
 			defer f.Close()
 
-			if err := fileSender.fileWriter(dataChan, f, info); err != nil {
+			if err := FileWriter(dataChan, bufSize, f, info); err != nil {
 				return err
 			}
 		}
@@ -152,7 +117,7 @@ func (fileSender TcpFileSender) folderWriter(dataChan chan<- []byte) error {
 /*
 Write file data to dataChan
 */
-func (fileSender TcpFileSender) fileWriter(dataChan chan<- []byte, f *os.File, fInfo ...fs.FileInfo) error {
+func FileWriter(dataChan chan<- []byte, bufSize int, f *os.File, fInfo ...fs.FileInfo) error {
 
 	var err error
 	var fInfoAux fs.FileInfo
@@ -173,7 +138,7 @@ func (fileSender TcpFileSender) fileWriter(dataChan chan<- []byte, f *os.File, f
 
 		buf := new(bytes.Buffer)
 
-		data := make([]byte, fileSender.BufSize)
+		data := make([]byte, bufSize)
 
 		n, err := io.ReadFull(f, data)
 		if err != nil && n == 0 {
@@ -188,7 +153,7 @@ func (fileSender TcpFileSender) fileWriter(dataChan chan<- []byte, f *os.File, f
 		}
 
 		//Check if is last chunk and add this information to the buffer
-		if n < fileSender.BufSize || readenBytes == int(fInfoAux.Size()) {
+		if n < bufSize || readenBytes == int(fInfoAux.Size()) {
 			if err = binary.Write(buf, binary.BigEndian, true); err != nil {
 				return err
 			}
@@ -205,7 +170,7 @@ func (fileSender TcpFileSender) fileWriter(dataChan chan<- []byte, f *os.File, f
 
 		dataChan <- buf.Bytes()
 
-		if n < fileSender.BufSize || readenBytes == int(fInfoAux.Size()) {
+		if n < bufSize || readenBytes == int(fInfoAux.Size()) {
 			break
 		}
 
@@ -217,7 +182,7 @@ func (fileSender TcpFileSender) fileWriter(dataChan chan<- []byte, f *os.File, f
 /*
 Writes information like file name and destination path to dataChan
 */
-func writeFileInfo(dataChan chan<- []byte, fileInfo []byte) error {
+func WriteFileInfo(dataChan chan<- []byte, fileInfo []byte) error {
 
 	buf := new(bytes.Buffer)
 
@@ -237,9 +202,9 @@ func writeFileInfo(dataChan chan<- []byte, fileInfo []byte) error {
 /*
 Forwards data from dataChan to the tcp server
 */
-func (fileSender TcpFileSender) tcpDataSender(dataChan <-chan []byte, ctx context.Context) {
+func TcpDataWriter(dataChan <-chan []byte, serverAddress string, ctx context.Context) {
 
-	conn, err := net.Dial("tcp", fileSender.ServerAddress)
+	conn, err := net.Dial("tcp", serverAddress)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -251,6 +216,27 @@ func (fileSender TcpFileSender) tcpDataSender(dataChan <-chan []byte, ctx contex
 			return
 		case c := <-dataChan:
 			_, err = conn.Write(c)
+			if err != nil {
+				log.Fatal(err)
+			}
+		}
+
+	}
+
+}
+
+/*
+Forwards data from dataChan to client as a response
+*/
+func TcpResponseWriter(dataChan <-chan []byte, conn net.Conn, ctx context.Context) {
+
+	for {
+
+		select {
+		case <-ctx.Done():
+			return
+		case c := <-dataChan:
+			_, err := conn.Write(c)
 			if err != nil {
 				log.Fatal(err)
 			}
