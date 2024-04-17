@@ -30,3 +30,11 @@ if err := client.RequestData("<server_source_path>", "<client_destination_path>"
 	log.Fatal(err)
 }
 ```
+
+Note:
+You can either send/request a single file or the whole folder from the server
+```go
+client.RequestData("C:\\source\\file.txt", "C:\\dest\\");
+//or
+client.RequestData("C:\\source\\", "C:\\dest\\");
+```
