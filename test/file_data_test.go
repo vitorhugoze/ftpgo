@@ -16,12 +16,12 @@ func TestSendFileData(t *testing.T) {
 	go ftpgo.NewTcpFileServer("<server_address:port>", false).Listen()
 	time.Sleep(300)
 
-	err := ftpgo.NewTcpDataClient("<server_address:port>", "<server_address>", "<dest_path>").SendData()
+	err := ftpgo.NewTcpDataClient("<server_address:port>").SendData("<source_file>", "<dest_path>")
 	if err != nil {
 		t.Error("Error sending data to server", err)
 	}
 
-	fSource, err := os.Open("<server_address:port>")
+	fSource, err := os.Open("<source_file>")
 	if err != nil {
 		t.Error("Error opening source file ", err)
 	}
@@ -42,12 +42,12 @@ func TestRequestFileData(t *testing.T) {
 	go ftpgo.NewTcpFileServer("<server_address:port>", false).Listen()
 	time.Sleep(300)
 
-	err := ftpgo.NewTcpDataClient("<server_address:port>", "<server_address>", "<dest_path>").RequestData()
+	err := ftpgo.NewTcpDataClient("<server_address:port>").RequestData("<source_file>", "<dest_path>")
 	if err != nil {
 		t.Error("Error sending data to server", err)
 	}
 
-	fSource, err := os.Open("<server_address:port>")
+	fSource, err := os.Open("<source_file>")
 	if err != nil {
 		t.Error("Error opening source file ", err)
 	}

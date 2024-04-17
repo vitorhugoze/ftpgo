@@ -13,30 +13,18 @@ import (
 )
 
 type TcpDataClient struct {
-	BufSize                             int
-	SingleFile                          bool
-	ServerAddress, SourcePath, DestPath string
+	BufSize       int
+	ServerAddress string
 }
 
 /*
 Creates a new handler that can be used to send and request data from server
 */
-func NewTcpDataClient(serverAddress, sourcePath, destPath string) TcpDataClient {
-
-	var singleFile bool
-
-	if filepath.Ext(sourcePath) == "" {
-		singleFile = false
-	} else {
-		singleFile = true
-	}
+func NewTcpDataClient(serverAddress string) TcpDataClient {
 
 	return TcpDataClient{
 		BufSize:       16384,
-		SingleFile:    singleFile,
 		ServerAddress: serverAddress,
-		SourcePath:    sourcePath,
-		DestPath:      destPath,
 	}
 }
 
@@ -48,10 +36,18 @@ func (dataClient TcpDataClient) WithBufferSize(BufSize int) TcpDataClient {
 /*
 Send file or folder from LocalPath on the client to ServerPath on server
 */
-func (dataClient TcpDataClient) SendData() error {
+func (dataClient TcpDataClient) SendData(sourcePath, destPath string) error {
+
+	var singleFile bool
 
 	buf := new(bytes.Buffer)
 	dataChan := make(chan []byte)
+
+	if filepath.Ext(sourcePath) == "" {
+		singleFile = false
+	} else {
+		singleFile = true
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -64,37 +60,37 @@ func (dataClient TcpDataClient) SendData() error {
 	}
 
 	//Tell server if is sending a single file or a folder
-	if err := binary.Write(buf, binary.BigEndian, dataClient.SingleFile); err != nil {
+	if err := binary.Write(buf, binary.BigEndian, singleFile); err != nil {
 		return err
 	}
 	dataChan <- buf.Bytes()
 
 	//Tell server the destination path
-	if err := tcp.WriteFileInfo(dataChan, []byte(filepath.Dir(dataClient.DestPath))); err != nil {
+	if err := tcp.WriteFileInfo(dataChan, []byte(filepath.Dir(destPath))); err != nil {
 		return err
 	}
 
 	//Check if is a folder or just a file
-	if dataClient.SingleFile {
+	if singleFile {
 
-		f, err := os.Open(dataClient.SourcePath)
+		f, err := os.Open(sourcePath)
 		if err != nil {
 			return err
 		}
 		defer f.Close()
 
 		//Writes filename to the server
-		if err = tcp.WriteFileInfo(dataChan, []byte(filepath.Base(dataClient.SourcePath))); err != nil {
+		if err = tcp.WriteFileInfo(dataChan, []byte(filepath.Base(sourcePath))); err != nil {
 			return err
 		}
 
 		return tcp.FileWriter(dataChan, dataClient.BufSize, f)
 	} else {
-		return tcp.FolderWriter(dataChan, dataClient.BufSize, dataClient.SourcePath)
+		return tcp.FolderWriter(dataChan, dataClient.BufSize, sourcePath)
 	}
 }
 
-func (dataClient TcpDataClient) RequestData() error {
+func (dataClient TcpDataClient) RequestData(sourcePath, destPath string) error {
 
 	buf := new(bytes.Buffer)
 	dataChan := make(chan []byte)
@@ -120,19 +116,19 @@ func (dataClient TcpDataClient) RequestData() error {
 	dataChan <- buf.Bytes()
 
 	//Writes file path to server
-	if err := tcp.WriteFileInfo(dataChan, []byte(dataClient.SourcePath)); err != nil {
+	if err := tcp.WriteFileInfo(dataChan, []byte(sourcePath)); err != nil {
 		return err
 	}
 
 	//Check if is folder or file
-	if filepath.Ext(dataClient.SourcePath) == "" {
-		err = tcp.FolderReader(conn, filepath.Dir(dataClient.DestPath))
+	if filepath.Ext(sourcePath) == "" {
+		err = tcp.FolderReader(conn, filepath.Dir(destPath))
 	} else {
 
-		if filepath.Ext(dataClient.DestPath) == "" {
-			err = tcp.FileReader(conn, filepath.Dir(dataClient.DestPath), filepath.Base(dataClient.SourcePath))
+		if filepath.Ext(destPath) == "" {
+			err = tcp.FileReader(conn, filepath.Dir(destPath), filepath.Base(sourcePath))
 		} else {
-			err = tcp.FileReader(conn, filepath.Dir(dataClient.DestPath), filepath.Base(dataClient.DestPath))
+			err = tcp.FileReader(conn, filepath.Dir(destPath), filepath.Base(destPath))
 		}
 	}
 
