@@ -11,9 +11,18 @@ ftpgo.NewTcpFileServer("localhost:5055").Listen()
 
 Now on the client side send a file to the server:
 ```go
-sender := ftpgo.NewTcpFileSender("localhost:5055", "<source_file>", "<server_destination_path>")
+client := ftpgo.NewTcpDataClient("localhost:5055", "<client_source_path>", "<server_destination_path>")
 
-if err := sender.SendData(); err != nil {
+if err := client.SendData(); err != nil {
+	log.Fatal(err)
+}
+```
+
+Or request a file from server:
+```go
+client := ftpgo.NewTcpDataClient("localhost:5055", "<server_source_path>", "<client_destination_path>")
+
+if err := client.RequestData(); err != nil {
 	log.Fatal(err)
 }
 ```

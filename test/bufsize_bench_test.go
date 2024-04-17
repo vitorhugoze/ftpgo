@@ -25,10 +25,10 @@ func BenchmarkSenderBufferSize(b *testing.B) {
 
 		b.Run(fmt.Sprint("Running test with buffer size: ", bufSize), func(b *testing.B) {
 
-			sender := ftpgo.NewTcpDataClient("<server_adress:port>", "<source_file>", "<dest_path>")
-			sender.WithBufferSize(int(bufSize))
+			client := ftpgo.NewTcpDataClient("<server_adress:port>", "<source_file>", "<dest_path>")
+			client.WithBufferSize(int(bufSize))
 
-			if err := sender.SendData(); err != nil {
+			if err := client.SendData(); err != nil {
 				log.Fatal(err)
 			}
 		})
